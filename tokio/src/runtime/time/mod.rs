@@ -18,6 +18,12 @@ pub(crate) use source::TimeSource;
 
 mod wheel;
 
+pub(crate) mod local_wheel;
+pub(crate) mod local_wheel_trait;
+
+mod cross_thread_cancel;
+pub(crate) use cross_thread_cancel::CrossThreadTimerSystem;
+
 use crate::loom::sync::atomic::{AtomicBool, Ordering};
 use crate::loom::sync::Mutex;
 use crate::runtime::driver::{self, IoHandle, IoStack};

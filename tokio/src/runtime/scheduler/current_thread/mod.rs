@@ -5,6 +5,8 @@ use crate::runtime::scheduler::{self, Defer, Inject};
 use crate::runtime::task::{
     self, JoinHandle, OwnedTasks, Schedule, Task, TaskHarnessScheduleHooks,
 };
+use crate::runtime::time::local_wheel::LocalTimerWheel;
+use crate::runtime::time::local_wheel_trait::LocalTimerWheelProvider;
 use crate::runtime::{
     blocking, context, Config, MetricsBatch, SchedulerMetrics, TaskHooks, TaskMeta, WorkerMetrics,
 };
@@ -76,6 +78,10 @@ struct Core {
     /// True if a task panicked without being handled and the runtime is
     /// configured to shutdown on unhandled panic.
     unhandled_panic: bool,
+
+
+    //本地时间轮
+    local_timer_wheel:LocalTimerWheel,
 }
 
 /// Scheduler state shared between threads.
@@ -171,6 +177,7 @@ impl CurrentThread {
             metrics: MetricsBatch::new(&handle.shared.worker_metrics),
             global_queue_interval,
             unhandled_panic: false,
+            local_timer_wheel:none
         })));
 
         let scheduler = CurrentThread {
@@ -358,6 +365,25 @@ fn wake_deferred_tasks_and_free(context: &Context) {
     }
 }
 
+impl LocalTimerWheelProvider for Core {
+    fn local_timer_wheel(&mut self) -> &mut LocalTimerWheel {
+        &mut self.local_timer_wheel
+    }
+
+    fn process_local_timers(&mut self,handle:&scheduler::Handle) {
+        let now = handle.driver().time().time_source().now(handle.driver().clock());
+
+        for timer_handle in self.local_timer_wheel.process_expired_and_cancelled(now) {
+            if let Some(waker) = unsafe { timer_handle.fire(Ok(()))}{
+                waker.wake();
+            }
+        }
+    }
+
+    fn next_local_timer_expiration(&self) -> Option<u64> {
+        self.local_timer_wheel.next_expiration()
+    }
+}
 // ===== impl Context =====
 
 impl Context {

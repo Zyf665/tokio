@@ -63,6 +63,7 @@ use crate::sync::AtomicWaker;
 use crate::time::Instant;
 use crate::util::linked_list;
 
+use std::sync::mpsc;
 use pin_project_lite::pin_project;
 use std::task::{Context, Poll, Waker};
 use std::{marker::PhantomPinned, pin::Pin, ptr::NonNull};
@@ -300,6 +301,11 @@ pin_project! {
         deadline: Instant,
         // Whether the deadline has been registered.
         registered: bool,
+
+        //注册状态
+        registration_state: RegistrationState,
+        //跨线程取消发送器
+        cancel_sender: Option<mpsc::Sender<TimerHandle>>
     }
 
     impl PinnedDrop for TimerEntry {
@@ -309,6 +315,13 @@ pin_project! {
     }
 }
 
+#[derive(Debug)]
+enum RegistrationState {
+    Unregistered, //未注册
+    RegisteredLocal,// 注册到本地
+    RegisteredGlobal, //注册到全局
+    PendingLocal,//等待注册到本地
+}
 unsafe impl Send for TimerEntry {}
 unsafe impl Sync for TimerEntry {}
 
@@ -488,9 +501,18 @@ impl TimerEntry {
             inner: None,
             deadline,
             registered: false,
+
+            registration_state:RegistrationState::Unregistered,
+            cancel_sender: None
         }
     }
 
+
+    //注册到当前线程的本地轮
+    fn try_register_local(self: Pin<&mut Self>) ->bool {
+      //获取当前线程上下文
+    //   if let Ok() = crate::runtime::context::with_current(f)
+    }
     fn inner(&self) -> Option<&TimerShared> {
         self.inner.as_ref()
     }
@@ -681,7 +703,7 @@ impl TimerHandle {
     ///
     /// SAFETY: The driver lock must be held while invoking this function, and
     /// the entry must not be in any wheel linked lists.
-    pub(super) unsafe fn fire(self, completed_state: TimerResult) -> Option<Waker> {
+    pub(crate) unsafe fn fire(self, completed_state: TimerResult) -> Option<Waker> {
         self.inner.as_ref().state.fire(completed_state)
     }
 }
